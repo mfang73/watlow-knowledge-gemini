@@ -1,0 +1,19 @@
+command:
+  - uvicorn
+  - backend.main:app
+  - --host
+  - 0.0.0.0
+  - --port
+  - "8000"
+
+env:
+  - name: CATALOG
+    value: uplight_demo_gen_catalog
+  - name: SCHEMA
+    value: watlow_ingestion
+  - name: VOLUME
+    value: raw_documents
+  - name: PARSED_TABLE
+    value: parsed_documents_gemini
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: sql-warehouse
