@@ -1,118 +1,57 @@
 # Databricks notebook source
-# MAGIC %pip install mlflow torch torchaudio openai-whisper
-# MAGIC dbutils.library.restartPython()
+# Prerequisites: Install the "Whisper V3" model from Databricks Marketplace
+# Marketplace > search "Whisper V3" > "Get instant access"
+# This creates the catalog "databricks_whisper_v3_models" with the pre-registered model.
 
 # COMMAND ----------
 
-import mlflow
-from mlflow.models.signature import ModelSignature
-from mlflow.types import DataType, Schema, ColSpec
-import numpy as np
+%pip install --upgrade databricks-sdk
+dbutils.library.restartPython()
 
 # COMMAND ----------
 
-# Define a custom MLflow PythonModel wrapper for Whisper
-class WhisperTranscriber(mlflow.pyfunc.PythonModel):
-    def load_context(self, context):
-        import whisper
-        # Load from bundled artifacts — no network download on cold start
-        model_dir = context.artifacts["whisper_model_dir"]
-        self.model = whisper.load_model("base", download_root=model_dir) #change base to medium for larger model
-
-    def predict(self, context, model_input):
-        import base64
-        import tempfile
-        import os
-        results = []
-        for idx, row in model_input.iterrows():
-            audio_b64 = row.get("audio", row.get("audio_base64", ""))
-            audio_bytes = base64.b64decode(audio_b64)
-            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-                f.write(audio_bytes)
-                tmp_path = f.name
-            try:
-                result = self.model.transcribe(tmp_path)
-                results.append(result["text"])
-            finally:
-                os.unlink(tmp_path)
-        return results
-
-# COMMAND ----------
-
-import whisper
-import os
-
-# Define model signature
-input_schema = Schema([ColSpec(DataType.string, "audio")])
-output_schema = Schema([ColSpec(DataType.string)])
-signature = ModelSignature(inputs=input_schema, outputs=output_schema)
-
-# Download model weights locally (one-time); bundled as artifact to avoid
-# re-downloading on every serving endpoint cold start
-model_dir = "/tmp/whisper_weights"
-os.makedirs(model_dir, exist_ok=True)
-whisper.load_model("base", download_root=model_dir) #change base to medium for larger model
-
-# Log and register the model
-catalog = "uplight_demo_gen_catalog"
-schema = "watlow_ingestion"
-model_name = f"{catalog}.{schema}.whisper_transcriber"
-
-with mlflow.start_run(run_name="whisper_base_deploy"):
-    mlflow.pyfunc.log_model(
-        artifact_path="whisper_model",
-        python_model=WhisperTranscriber(),
-        registered_model_name=model_name,
-        signature=signature,
-        artifacts={"whisper_model_dir": model_dir},
-        pip_requirements=[
-            "openai-whisper",
-            "torch>=2.0,<3",
-            "torchaudio>=2.0,<3",
-            "numpy<2",
-        ],
-    )
-
-print(f"Model registered as: {model_name}")
-
-# COMMAND ----------
-
-# Get latest model version using search_model_versions (UC compatible)
-from mlflow import MlflowClient
-from datetime import timedelta
-client = MlflowClient()
-versions = client.search_model_versions(f"name='{model_name}'")
-model_version = max(v.version for v in versions)
-print(f"Deploying model version: {model_version}")
-
-# Create serving endpoint via Databricks SDK
+import datetime
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service.serving import EndpointCoreConfigInput, ServedEntityInput
+from databricks.sdk.service.serving import EndpointCoreConfigInput
+
+# Marketplace model location (created when you install from Marketplace)
+catalog_name = "databricks_whisper_v3_models"
+model_uc_path = f"{catalog_name}.models.whisper_large_v3"
+version = "1"
 
 w = WorkspaceClient()
 
-served_entity = ServedEntityInput(
-    entity_name=model_name,
-    entity_version=str(model_version),
-    workload_size="Small", #increase this for faster processing (transcription accuracy is good, just slow)
-    workload_type="GPU_SMALL", #increase this and switch to medium whisper model for better transcription accuracy
-    scale_to_zero_enabled=True,
-)
+config = EndpointCoreConfigInput.from_dict({
+    "served_models": [
+        {
+            "name": "whisper-transcriber",
+            "model_name": model_uc_path,
+            "model_version": version,
+            "workload_type": "GPU_MEDIUM",
+            "workload_size": "Small",
+            "scale_to_zero_enabled": "True",
+        }
+    ]
+})
 
 try:
-    w.serving_endpoints.create_and_wait(
-        name="whisper-transcriber",
-        config=EndpointCoreConfigInput(served_entities=[served_entity]),
-        timeout=timedelta(minutes=40),
-    )
+    model_details = w.serving_endpoints.create(name="whisper-transcriber", config=config)
+    model_details.result(timeout=datetime.timedelta(minutes=40))
     print("Endpoint 'whisper-transcriber' created and ready!")
 except Exception as e:
     if "already exists" in str(e).lower():
         print("Endpoint already exists, updating...")
         w.serving_endpoints.update_config_and_wait(
             name="whisper-transcriber",
-            served_entities=[served_entity],
-            timeout=timedelta(minutes=40),
+            served_entities=[{
+                "name": "whisper-transcriber",
+                "entity_name": model_uc_path,
+                "entity_version": version,
+                "workload_type": "GPU_MEDIUM",
+                "workload_size": "Small",
+                "scale_to_zero_enabled": True,
+            }],
+            timeout=datetime.timedelta(minutes=40),
         )
         print("Endpoint updated!")
     else:

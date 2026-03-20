@@ -1,3 +1,4 @@
+import base64
 import os
 import threading
 import time
@@ -17,6 +18,7 @@ SCHEMA = os.getenv("SCHEMA", "ingestion")
 VOLUME = os.getenv("VOLUME", "raw_documents")
 PARSED_TABLE = os.getenv("PARSED_TABLE", "parsed_documents")
 WAREHOUSE_ID = os.getenv("DATABRICKS_WAREHOUSE_ID", "")
+WHISPER_ENDPOINT = os.getenv("WHISPER_ENDPOINT", "whisper-transcriber")
 
 ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".bmp", ".mp3"}
 MAX_FILE_SIZE = 200 * 1024 * 1024  # 200MB
@@ -36,30 +38,23 @@ def _exec(statement: str, wait_timeout: str = "30s"):
     )
 
 
-def _transcribe_audio_async(volume_path: str, document_id: str):
-    """Submit async ai_query transcription job via whisper-transcriber and poll for result."""
-    statement = f"""
-        SELECT ai_query(
-            'whisper-transcriber',
-            content
-        ) AS transcript
-        FROM read_files('{volume_path}', format => 'binaryFile')
-    """
-    try:
-        result = _exec(statement, wait_timeout="0s")
-        statement_id = result.statement_id
-        _exec(f"""
-            UPDATE {TABLE_NAME}
-            SET parse_metadata = '{statement_id}'
-            WHERE document_id = '{document_id}'
-        """)
-        threading.Thread(
-            target=_poll_and_update,
-            args=(statement_id, document_id),
-            daemon=True,
-        ).start()
-    except Exception as e:
-        _update_parse_status(document_id, "error", "", str(e))
+def _transcribe_audio_direct(audio_bytes: bytes, document_id: str):
+    """Transcribe audio by calling the whisper endpoint directly with audio bytes."""
+    def _do_transcribe():
+        try:
+            audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
+            response = w.serving_endpoints.query(
+                name=WHISPER_ENDPOINT,
+                dataframe_records=[audio_b64],
+            )
+            transcript = ""
+            if response.predictions:
+                transcript = response.predictions[0] if isinstance(response.predictions[0], str) else str(response.predictions[0])
+            _update_parse_status(document_id, "completed", transcript, "")
+        except Exception as e:
+            _update_parse_status(document_id, "error", "", str(e))
+
+    threading.Thread(target=_do_transcribe, daemon=True).start()
 
 
 @asynccontextmanager
@@ -144,8 +139,8 @@ async def upload_file(file: UploadFile = File(...)):
         print(f"Warning: Failed to insert record: {e}")
 
     if ext == ".mp3":
-        # MP3: transcribe via whisper-transcriber using async ai_query SQL
-        _transcribe_audio_async(volume_path, document_id)
+        # MP3: transcribe by calling whisper endpoint directly with audio bytes
+        _transcribe_audio_direct(content, document_id)
     else:
         # PDF/images: parse via ai_parse_document SQL
         statement = f"""
