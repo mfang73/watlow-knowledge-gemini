@@ -31,7 +31,8 @@ React Frontend
 │   └── build/               # React frontend (pre-built static files)
 ├── deploy_whisper.py         # Notebook: deploy Whisper V3 from system.ai
 ├── batch_transcribe.py       # Notebook: batch transcribe unprocessed MP3s offline
-└── keepalive.py              # Notebook: ping whisper endpoint to prevent scale-to-zero
+├── keepalive.py              # Notebook: ping whisper endpoint to prevent scale-to-zero
+└── CLAUDE.md                 # Project context for Claude Code AI assistant
 ```
 
 ## Prerequisites
