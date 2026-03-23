@@ -30,6 +30,7 @@ React Frontend
 ├── frontend/
 │   └── build/               # React frontend (pre-built static files)
 ├── deploy_whisper.py         # Notebook: deploy Whisper V3 from system.ai
+├── batch_transcribe.py       # Notebook: batch transcribe unprocessed MP3s offline
 └── keepalive.py              # Notebook: ping whisper endpoint to prevent scale-to-zero
 ```
 
@@ -37,7 +38,7 @@ React Frontend
 
 - Databricks workspace with Unity Catalog enabled
 - SQL Warehouse
-- `system.ai.whisper_large_v3` model available in Unity Catalog
+- `system.ai.whisper_large_v3` model available in Unity Catalog — install via the [Databricks Marketplace](https://marketplace.databricks.com/details/1eceaa77-6b60-42f0-9809-ceccf1b237f5/Databricks_Whisper-V3-Model)
 
 ## Setup
 
@@ -64,7 +65,19 @@ databricks apps create --name watlow-knowledge-ingestion
 databricks apps deploy watlow-knowledge-ingestion --source-code-path /Workspace/path/to/this/project
 ```
 
-### 4. (Optional) Schedule keepalive
+### 4. (Optional) Batch transcribe
+
+Run `batch_transcribe.py` as a notebook or scheduled job to bulk-transcribe MP3 files that haven't been processed yet. This is useful for:
+
+- Backfilling historical audio files already in the volume
+- Reprocessing files that failed during real-time upload
+- Bulk ingestion of large audio datasets
+
+The notebook scans the UC Volume for unprocessed MP3s, transcribes them via `ai_query` on the SQL warehouse, and merges results into the parsed documents table. Individual file failures are handled gracefully — the batch continues and failed files are marked with error details.
+
+Override defaults via Databricks widgets or job parameters: `catalog`, `schema`, `volume`, `parsed_table`, `whisper_endpoint`.
+
+### 5. (Optional) Schedule keepalive
 
 Run `keepalive.py` on a schedule (e.g., every 30 minutes during business hours) to keep the Whisper endpoint warm and avoid cold-start latency.
 
