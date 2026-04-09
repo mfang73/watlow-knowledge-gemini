@@ -1,5 +1,7 @@
 import base64
 import os
+import subprocess
+import tempfile
 import threading
 import time
 import uuid
@@ -21,7 +23,8 @@ PARSED_TABLE = os.getenv("PARSED_TABLE", "parsed_documents")
 WAREHOUSE_ID = os.getenv("DATABRICKS_WAREHOUSE_ID", "")
 WHISPER_ENDPOINT = os.getenv("WHISPER_ENDPOINT", "whisper-transcriber")
 
-ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".bmp", ".mp3"}
+ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".bmp", ".mp3", ".mp4", ".mov", ".avi", ".webm"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".webm"}
 MAX_FILE_SIZE = 200 * 1024 * 1024  # 200MB
 
 VOLUME_PATH = f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}"
@@ -39,10 +42,53 @@ def _exec(statement: str, wait_timeout: str = "30s"):
     )
 
 
+def _extract_audio_from_video(video_bytes: bytes, video_ext: str) -> bytes:
+    """Extract audio from video bytes using ffmpeg, returns mp3 bytes."""
+    import imageio_ffmpeg
+    ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+    with tempfile.NamedTemporaryFile(suffix=video_ext, delete=False) as vid_f:
+        vid_f.write(video_bytes)
+        vid_path = vid_f.name
+    audio_path = vid_path + ".mp3"
+    try:
+        subprocess.run(
+            [ffmpeg_path, "-i", vid_path, "-vn", "-acodec", "libmp3lame", "-q:a", "2", audio_path, "-y"],
+            capture_output=True, check=True, timeout=300,
+        )
+        with open(audio_path, "rb") as f:
+            return f.read()
+    finally:
+        for p in (vid_path, audio_path):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+
+
 def _transcribe_audio_direct(audio_bytes: bytes, document_id: str):
     """Transcribe audio by calling the whisper endpoint directly with audio bytes."""
     def _do_transcribe():
         try:
+            audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
+            response = w.serving_endpoints.query(
+                name=WHISPER_ENDPOINT,
+                dataframe_records=[audio_b64],
+            )
+            transcript = ""
+            if response.predictions:
+                transcript = response.predictions[0] if isinstance(response.predictions[0], str) else str(response.predictions[0])
+            _update_parse_status(document_id, "completed", transcript, "")
+        except Exception as e:
+            _update_parse_status(document_id, "error", "", str(e))
+
+    threading.Thread(target=_do_transcribe, daemon=True).start()
+
+
+def _transcribe_video(video_bytes: bytes, video_ext: str, document_id: str):
+    """Extract audio from video and transcribe via Whisper."""
+    def _do_transcribe():
+        try:
+            audio_bytes = _extract_audio_from_video(video_bytes, video_ext)
             audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
             response = w.serving_endpoints.query(
                 name=WHISPER_ENDPOINT,
@@ -97,6 +143,7 @@ async def health():
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
 
+
 @app.post("/api/upload")
 async def upload_file(file: UploadFile = File(...)):
     """Upload a file, store in UC Volume, parse with AI, and save results."""
@@ -142,6 +189,9 @@ async def upload_file(file: UploadFile = File(...)):
     if ext == ".mp3":
         # MP3: transcribe by calling whisper endpoint directly with audio bytes
         _transcribe_audio_direct(content, document_id)
+    elif ext in VIDEO_EXTENSIONS:
+        # Video: extract audio, then transcribe via whisper
+        _transcribe_video(content, ext, document_id)
     else:
         # PDF/images: parse via ai_parse_document SQL
         statement = f"""

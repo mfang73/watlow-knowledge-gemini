@@ -2,3 +2,4 @@ fastapi
 uvicorn
 databricks-sdk
 python-multipart
+imageio-ffmpeg
