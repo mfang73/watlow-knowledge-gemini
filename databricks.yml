@@ -1,0 +1,38 @@
+bundle:
+  name: watlow-knowledge-ingestion
+
+variables:
+  catalog:
+    description: Unity Catalog catalog name
+    default: uplight_demo_gen_catalog
+  schema:
+    description: Schema for tables and volumes
+    default: watlow_ingestion
+  volume:
+    description: Volume for raw document storage
+    default: raw_documents
+  parsed_table:
+    description: Delta table for parsed content
+    default: parsed_documents_gemini
+  whisper_endpoint:
+    description: Model serving endpoint for audio transcription
+    default: whisper-transcriber
+
+include:
+  - resources/*.yml
+
+targets:
+  dev:
+    workspace:
+      host: https://fevm-uplight-demo-gen.cloud.databricks.com
+    default: true
+    variables:
+      catalog: uplight_demo_gen_catalog
+      schema: watlow_ingestion
+
+  prod:
+    workspace:
+      host: https://fevm-uplight-demo-gen.cloud.databricks.com
+    variables:
+      catalog: uplight_demo_gen_catalog
+      schema: watlow_ingestion

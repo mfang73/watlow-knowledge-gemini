@@ -1,0 +1,38 @@
+resources:
+  jobs:
+    deploy_whisper:
+      name: "[${bundle.target}] Deploy Whisper Endpoint"
+      tasks:
+        - task_key: deploy_whisper
+          notebook_task:
+            notebook_path: ../deploy_whisper.py
+          existing_cluster_id: ""
+          new_cluster:
+            spark_version: "15.4.x-scala2.12"
+            node_type_id: "i3.xlarge"
+            num_workers: 0
+            spark_conf:
+              spark.databricks.cluster.profile: singleNode
+              spark.master: "local[*]"
+            custom_tags:
+              ResourceClass: SingleNode
+
+    keepalive:
+      name: "[${bundle.target}] Whisper Keepalive"
+      schedule:
+        quartz_cron_expression: "0 0/30 8-17 ? * MON-FRI"
+        timezone_id: America/Chicago
+      tasks:
+        - task_key: keepalive
+          notebook_task:
+            notebook_path: ../keepalive.py
+          existing_cluster_id: ""
+          new_cluster:
+            spark_version: "15.4.x-scala2.12"
+            node_type_id: "i3.xlarge"
+            num_workers: 0
+            spark_conf:
+              spark.databricks.cluster.profile: singleNode
+              spark.master: "local[*]"
+            custom_tags:
+              ResourceClass: SingleNode

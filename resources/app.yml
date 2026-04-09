@@ -1,0 +1,32 @@
+resources:
+  apps:
+    watlow-knowledge-ingestion:
+      name: watlow-knowledge-ingestion
+      description: Knowledge ingestion app for PDFs, images, audio, and video
+      source_code_path: ../
+      config:
+        command:
+          - uvicorn
+          - backend.main:app
+          - --host
+          - 0.0.0.0
+          - --port
+          - "8000"
+        env:
+          - name: CATALOG
+            value: ${var.catalog}
+          - name: SCHEMA
+            value: ${var.schema}
+          - name: VOLUME
+            value: ${var.volume}
+          - name: PARSED_TABLE
+            value: ${var.parsed_table}
+          - name: WHISPER_ENDPOINT
+            value: ${var.whisper_endpoint}
+          - name: DATABRICKS_WAREHOUSE_ID
+            value_from: sql-warehouse
+      resources:
+        - name: sql-warehouse
+          sql_warehouse:
+            id: a5cce7b67b233713
+            permission: CAN_USE
