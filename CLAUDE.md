@@ -29,7 +29,7 @@ Watlow Knowledge Ingestion — a Databricks App (FastAPI + React) that ingests P
 - **App name:** `watlow-knowledge-ingestion`
 - **Deployed from:** `/Workspace/Shared/apps/watlow-knowledge-ingestion/`
 - **Source also at:** `/Workspace/Users/megan.fang@databricks.com/watlow-knowledge-gemini/`
-- **GitHub:** `mfang73/watlow-knowledge-gemini` (private, personal account — requires `gh auth login` as `mfang73` to push)
+- **GitHub:** `mfang73/multimodal-transcription-app` (private, personal account — requires `gh auth login` as `mfang73` to push)
 
 ## Environment Variables (app.yaml)
 
